@@ -48,7 +48,12 @@ data = load_data()
 rooster_data = data["rooster_data"]
 bereikbaarheden = data["bereikbaarheden"]
 
-locale.setlocale(locale.LC_TIME, 'nl_NL.UTF-8')
+import locale
+try:
+    locale.setlocale(locale.LC_TIME, 'nl_NL.UTF-8')
+except locale.Error:
+    # Fallback: gebruik default (Engels)
+    pass
 today = datetime.date.today()
 dagen = [today, today + datetime.timedelta(days=1), today + datetime.timedelta(days=2)]
 
