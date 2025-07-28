@@ -1,5 +1,4 @@
 # Sla dit bestand op in de 'pages' map als 1_🗓️_Weekoverzicht.py
-# Dit was voorheen het Dagoverzicht
 
 import streamlit as st
 import datetime
@@ -10,7 +9,7 @@ initialize_session_state()
 st.set_page_config(page_title="Weekoverzicht", layout="wide")
 st.title("🗓️ Weekoverzicht")
 
-if not st.session_state.rooster_data:
+if not st.session_state.rooster_data and not st.session_state.notes_data:
     st.info("Er is nog geen roosterdata. Ga naar het 'Controlepaneel' om het rooster te vullen.")
     st.stop()
 
@@ -30,6 +29,9 @@ def format_medewerker_display(medewerker, werkplek_info):
     """
 
 start_datum = st.date_input("Selecteer startdatum", datetime.date.today())
+maand_key = start_datum.strftime("%Y-%m")
+if st.session_state.rooster_vastgesteld.get(maand_key, False):
+    st.warning(f"🔒 **Rooster Vastgesteld** voor {start_datum.strftime('%B %Y')}")
 st.divider()
 
 for i in range(7):
@@ -38,17 +40,18 @@ for i in range(7):
     dag_naam = huidige_dag.strftime("%A").capitalize()
 
     with st.expander(f"**{dag_naam} {huidige_dag.strftime('%d-%m-%Y')}**", expanded=True):
-        dag_rooster = st.session_state.rooster_data.get(datum_str, {})
         dag_beschikbaarheid = st.session_state.beschikbaarheid_data.get(datum_str, {})
-
-        onbemande_skills = [s for s in SKILLS_BEREIKBAARHEID if not any(d.get(s, False) for d in dag_beschikbaarheid.values())]
-        if onbemande_skills:
-            st.error(f"❌ Geen bereikbare medewerker voor: **{', '.join(onbemande_skills)}**")
-        else:
-            st.success("✅ Alle disciplines zijn gedekt.")
+        
+        if huidige_dag.weekday() < 5:
+            onbemande_skills = [s for s in SKILLS_BEREIKBAARHEID if not any(d.get(s, False) for d in dag_beschikbaarheid.values())]
+            if onbemande_skills:
+                st.error(f"❌ Geen bereikbare medewerker voor: **{', '.join(onbemande_skills)}**")
+            else:
+                st.success("✅ Alle disciplines zijn gedekt.")
         
         st.write("**Ingeplande medewerkers:**")
         
+        dag_rooster = st.session_state.rooster_data.get(datum_str, {})
         werkende_medewerkers = {m: w for m, w in dag_rooster.items() if w not in NIET_WERKEND_STATUS}
         
         if not werkende_medewerkers:
