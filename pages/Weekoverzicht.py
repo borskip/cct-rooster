@@ -1,56 +1,63 @@
-# Sla dit bestand op in de 'pages' map als 2_📊_Weekoverzicht.py
+# Sla dit bestand op in de 'pages' map als 1_🗓️_Weekoverzicht.py
+# Dit was voorheen het Dagoverzicht
 
 import streamlit as st
 import datetime
-import pandas as pd
+from utils import initialize_session_state
+
+initialize_session_state()
 
 st.set_page_config(page_title="Weekoverzicht", layout="wide")
-st.title("📊 Weekoverzicht")
+st.title("🗓️ Weekoverzicht")
 
-if not st.session_state.get('rooster_data'):
-    st.info("Er is nog geen roosterdata. Ga naar de hoofdpagina 'Rooster_App' om data te genereren.")
+if not st.session_state.rooster_data:
+    st.info("Er is nog geen roosterdata. Ga naar het 'Controlepaneel' om het rooster te vullen.")
     st.stop()
 
 WERKPLEK_MAP = st.session_state.WERKPLEK_MAP
-MEDEWERKERS = st.session_state.MEDEWERKERS
+SKILLS_BEREIKBAARHEID = st.session_state.SKILLS_BEREIKBAARHEID
 NIET_WERKEND_STATUS = st.session_state.NIET_WERKEND_STATUS
 
-def style_rooster(val):
-    """Past kleur toe op basis van de werkplek-afkorting."""
-    werkplek_info = next((info for info in WERKPLEK_MAP.values() if info['afkorting'] == val), None)
-    if werkplek_info and werkplek_info['kleur']:
-        return f'background-color: {werkplek_info["kleur"]}; color: {werkplek_info["tekstkleur"]}; font-weight: bold;'
-    return ''
+def format_medewerker_display(medewerker, werkplek_info):
+    bg_color = werkplek_info.get('kleur', '#f0f2f6')
+    text_color = werkplek_info.get('tekstkleur', '#000000')
+    afkorting = werkplek_info.get('afkorting', '???')
+    return f"""
+    <div style='margin-bottom: 5px; padding: 5px; border-left: 5px solid {bg_color};'>
+        <span style='background-color: {bg_color}; color: {text_color}; padding: 3px 6px; border-radius: 5px; font-weight: bold; font-family: monospace;'>{afkorting}</span>
+        <strong style='margin-left: 10px;'>{medewerker}</strong>
+    </div>
+    """
 
-# UI Logica
-selected_date = st.date_input("Selecteer een datum om de week te tonen", datetime.date.today())
-start_of_week = selected_date - datetime.timedelta(days=selected_date.weekday())
-dagen_van_de_week = [start_of_week + datetime.timedelta(days=i) for i in range(7)]
-dagen_namen = [dag.strftime("%a %d-%m") for dag in dagen_van_de_week]
+start_datum = st.date_input("Selecteer startdatum", datetime.date.today())
+st.divider()
 
-st.header(f"Week van {start_of_week.strftime('%d-%m-%Y')}")
+for i in range(7):
+    huidige_dag = start_datum + datetime.timedelta(days=i)
+    datum_str = huidige_dag.strftime("%Y-%m-%d")
+    dag_naam = huidige_dag.strftime("%A").capitalize()
 
-data = []
-for medewerker in MEDEWERKERS:
-    row = {}
-    is_working_this_week = False
-    for i, dag in enumerate(dagen_van_de_week):
-        datum_str = dag.strftime("%Y-%m-%d")
-        werkplek = st.session_state.rooster_data.get(datum_str, {}).get(medewerker)
-        
-        if werkplek and werkplek not in NIET_WERKEND_STATUS:
-            row[dagen_namen[i]] = WERKPLEK_MAP.get(werkplek, {}).get('afkorting', '???')
-            is_working_this_week = True
+    with st.expander(f"**{dag_naam} {huidige_dag.strftime('%d-%m-%Y')}**", expanded=True):
+        dag_rooster = st.session_state.rooster_data.get(datum_str, {})
+        dag_beschikbaarheid = st.session_state.beschikbaarheid_data.get(datum_str, {})
+
+        onbemande_skills = [s for s in SKILLS_BEREIKBAARHEID if not any(d.get(s, False) for d in dag_beschikbaarheid.values())]
+        if onbemande_skills:
+            st.error(f"❌ Geen bereikbare medewerker voor: **{', '.join(onbemande_skills)}**")
         else:
-            row[dagen_namen[i]] = ""
-    
-    if is_working_this_week:
-        row['Medewerker'] = medewerker
-        data.append(row)
-
-if not data:
-    st.info("Geen medewerkers ingeroosterd om te tonen voor deze week.")
-else:
-    df = pd.DataFrame(data).set_index('Medewerker')
-    df_styled = df.style.applymap(style_rooster)
-    st.dataframe(df_styled, use_container_width=True)
+            st.success("✅ Alle disciplines zijn gedekt.")
+        
+        st.write("**Ingeplande medewerkers:**")
+        
+        werkende_medewerkers = {m: w for m, w in dag_rooster.items() if w not in NIET_WERKEND_STATUS}
+        
+        if not werkende_medewerkers:
+            st.write("Niemand ingeroosterd.")
+        else:
+            sorted_medewerkers = sorted(werkende_medewerkers.items(), key=lambda item: (WERKPLEK_MAP[item[1]]['display_group'], item[0]))
+            
+            cols = st.columns(3)
+            for idx, (medewerker, werkplek) in enumerate(sorted_medewerkers):
+                with cols[idx % 3]:
+                    werkplek_info = WERKPLEK_MAP.get(werkplek, {})
+                    st.markdown(format_medewerker_display(medewerker, werkplek_info), unsafe_allow_html=True)
