@@ -1,64 +1,56 @@
-# Sla dit bestand op in de 'pages' map als 3_📅_Maandoverzicht.py
+# Sla dit bestand op in de 'pages' map als 2_📊_Weekoverzicht.py
 
 import streamlit as st
-from streamlit_calendar import calendar
+import datetime
+import pandas as pd
 
-st.set_page_config(page_title="Maandoverzicht", layout="wide")
-st.title("📅 Maandoverzicht (Kalender)")
+st.set_page_config(page_title="Weekoverzicht", layout="wide")
+st.title("📊 Weekoverzicht")
 
 if not st.session_state.get('rooster_data'):
     st.info("Er is nog geen roosterdata. Ga naar de hoofdpagina 'Rooster_App' om data te genereren.")
     st.stop()
 
 WERKPLEK_MAP = st.session_state.WERKPLEK_MAP
-SKILLS_BEREIKBAARHEID = st.session_state.SKILLS_BEREIKBAARHEID
+MEDEWERKERS = st.session_state.MEDEWERKERS
 NIET_WERKEND_STATUS = st.session_state.NIET_WERKEND_STATUS
 
-def build_events_list():
-    events = []
-    all_dates = sorted(list(set(st.session_state.rooster_data.keys()) | set(st.session_state.beschikbaarheid_data.keys())))
+def style_rooster(val):
+    """Past kleur toe op basis van de werkplek-afkorting."""
+    werkplek_info = next((info for info in WERKPLEK_MAP.values() if info['afkorting'] == val), None)
+    if werkplek_info and werkplek_info['kleur']:
+        return f'background-color: {werkplek_info["kleur"]}; color: {werkplek_info["tekstkleur"]}; font-weight: bold;'
+    return ''
 
-    for datum_key in all_dates:
-        dag_beschikbaarheid = st.session_state.beschikbaarheid_data.get(datum_key, {})
-        onbemande_skills = [s for s in SKILLS_BEREIKBAARHEID if not any(d.get(s) for d in dag_beschikbaarheid.values())]
-        if onbemande_skills:
-            events.append({
-                "title": f"⚠️ Geen: {', '.join(onbemande_skills)}",
-                "start": datum_key, "allDay": True,
-                "backgroundColor": "#dc3545", "textColor": "#ffffff", "borderColor": "#dc3545",
-            })
+# UI Logica
+selected_date = st.date_input("Selecteer een datum om de week te tonen", datetime.date.today())
+start_of_week = selected_date - datetime.timedelta(days=selected_date.weekday())
+dagen_van_de_week = [start_of_week + datetime.timedelta(days=i) for i in range(7)]
+dagen_namen = [dag.strftime("%a %d-%m") for dag in dagen_van_de_week]
 
-        dag_info = st.session_state.rooster_data.get(datum_key, {})
-        for medewerker, werkplek in dag_info.items():
-            if werkplek not in NIET_WERKEND_STATUS:
-                werkplek_info = WERKPLEK_MAP[werkplek]
-                
-                # --- AANGEPAST: Voeg een sorteerveld toe aan het event-object ---
-                # Dit veld wordt gebruikt door de 'eventOrder' optie van de kalender.
-                sort_priority = 0 if werkplek_info['display_group'] == 'Kantoor' else 1
-                
-                event = {
-                    "title": f"[{werkplek_info['afkorting']}] {medewerker}",
-                    "start": datum_key,
-                    "allDay": True,
-                    "backgroundColor": werkplek_info['kleur'],
-                    "textColor": werkplek_info['tekstkleur'],
-                    "borderColor": werkplek_info['kleur'],
-                    "sort_priority": sort_priority, # BELANGRIJK: dit veld wordt nu meegegeven!
-                }
-                events.append(event)
-    return events
+st.header(f"Week van {start_of_week.strftime('%d-%m-%Y')}")
 
-calendar(
-    events=build_events_list(),
-    options={
-        "headerToolbar": {"left": "prev,next today", "center": "title", "right": "dayGridMonth,timeGridWeek"},
-        "initialView": "dayGridMonth",
-        "locale": "nl", "height": 800,
-        "eventDisplay": 'block',
+data = []
+for medewerker in MEDEWERKERS:
+    row = {}
+    is_working_this_week = False
+    for i, dag in enumerate(dagen_van_de_week):
+        datum_str = dag.strftime("%Y-%m-%d")
+        werkplek = st.session_state.rooster_data.get(datum_str, {}).get(medewerker)
         
-        # --- DE FIX: Vertel de kalender hoe hij events moet sorteren ---
-        # Sorteer eerst op ons eigen 'sort_priority' veld, en daarna alfabetisch op titel.
-        "eventOrder": "sort_priority, title"
-    }
-)
+        if werkplek and werkplek not in NIET_WERKEND_STATUS:
+            row[dagen_namen[i]] = WERKPLEK_MAP.get(werkplek, {}).get('afkorting', '???')
+            is_working_this_week = True
+        else:
+            row[dagen_namen[i]] = ""
+    
+    if is_working_this_week:
+        row['Medewerker'] = medewerker
+        data.append(row)
+
+if not data:
+    st.info("Geen medewerkers ingeroosterd om te tonen voor deze week.")
+else:
+    df = pd.DataFrame(data).set_index('Medewerker')
+    df_styled = df.style.applymap(style_rooster)
+    st.dataframe(df_styled, use_container_width=True)
