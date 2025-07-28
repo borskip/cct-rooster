@@ -1,118 +1,64 @@
+# Sla dit bestand op in de 'pages' map als 3_📅_Maandoverzicht.py
+
 import streamlit as st
 from streamlit_calendar import calendar
-import json
-from pathlib import Path
-import datetime
-
-# =========================================================================
-#                   CONFIGURATIE & CONSTANTEN
-# =========================================================================
 
 st.set_page_config(page_title="Maandoverzicht", layout="wide")
-st.title("📅 Maandoverzicht")
+st.title("📅 Maandoverzicht (Kalender)")
 
-DATA_FILE = Path("rooster_app_data.json")
-WERKPLEKKEN_CONFIG = [
-    {"naam": "Niet ingepland", "emoji": "❌"},
-    {"naam": "Kantoor", "emoji": "🏤"},
-    {"naam": "Thuiswerk", "emoji": "🏠"},
-    {"naam": "Opleiding", "emoji": "🧑‍🏫"},
-    {"naam": "IBT", "emoji": "💪"},
-    {"naam": "Vakantie/Verlof", "emoji": "🏖️"},
-]
-WERKPLEK_MAP = {item["naam"]: item for item in WERKPLEKKEN_CONFIG}
-DEFAULT_WERKPLEK = "Niet ingepland"
+if not st.session_state.get('rooster_data'):
+    st.info("Er is nog geen roosterdata. Ga naar de hoofdpagina 'Rooster_App' om data te genereren.")
+    st.stop()
 
-MEDEWERKERS = sorted([
-    "Jan", "Emma", "Sophie", "Tom", "Lisa", "Daan", "Eva", "Milan", "Laura", "Rob",
-    "Julia", "Sam", "Sanne", "Thijs", "Noa", "Lars", "Puck", "Bas", "Vera", "Nina"
-])
+WERKPLEK_MAP = st.session_state.WERKPLEK_MAP
+SKILLS_BEREIKBAARHEID = st.session_state.SKILLS_BEREIKBAARHEID
+NIET_WERKEND_STATUS = st.session_state.NIET_WERKEND_STATUS
 
-DISCIPLINES = {
-    "digi": ["Jan", "Emma", "Sophie", "Tom"],
-    "intel": ["Lisa", "Daan", "Eva"],
-    "leiding": ["Milan", "Laura", "Rob"],
-    "tactiek": ["Julia", "Sam", "Sanne", "Thijs", "Noa", "Lars"]
-}
+def build_events_list():
+    events = []
+    all_dates = sorted(list(set(st.session_state.rooster_data.keys()) | set(st.session_state.beschikbaarheid_data.keys())))
 
-# =========================================================================
-#                   DATA LADEN
-# =========================================================================
+    for datum_key in all_dates:
+        dag_beschikbaarheid = st.session_state.beschikbaarheid_data.get(datum_key, {})
+        onbemande_skills = [s for s in SKILLS_BEREIKBAARHEID if not any(d.get(s) for d in dag_beschikbaarheid.values())]
+        if onbemande_skills:
+            events.append({
+                "title": f"⚠️ Geen: {', '.join(onbemande_skills)}",
+                "start": datum_key, "allDay": True,
+                "backgroundColor": "#dc3545", "textColor": "#ffffff", "borderColor": "#dc3545",
+            })
 
-def load_data():
-    if not DATA_FILE.exists():
-        return {"rooster_data": {}, "bereikbaarheden": {}}
-    try:
-        with open(DATA_FILE, 'r') as f:
-            data = json.load(f)
-            return {
-                "rooster_data": data.get("rooster_data", {}),
-                "bereikbaarheden": data.get("bereikbaarheden", {})
-            }
-    except (json.JSONDecodeError, FileNotFoundError):
-        st.error("Kon roosterdata niet laden.")
-        return {"rooster_data": {}, "bereikbaarheden": {}}
+        dag_info = st.session_state.rooster_data.get(datum_key, {})
+        for medewerker, werkplek in dag_info.items():
+            if werkplek not in NIET_WERKEND_STATUS:
+                werkplek_info = WERKPLEK_MAP[werkplek]
+                
+                # --- AANGEPAST: Voeg een sorteerveld toe aan het event-object ---
+                # Dit veld wordt gebruikt door de 'eventOrder' optie van de kalender.
+                sort_priority = 0 if werkplek_info['display_group'] == 'Kantoor' else 1
+                
+                event = {
+                    "title": f"[{werkplek_info['afkorting']}] {medewerker}",
+                    "start": datum_key,
+                    "allDay": True,
+                    "backgroundColor": werkplek_info['kleur'],
+                    "textColor": werkplek_info['tekstkleur'],
+                    "borderColor": werkplek_info['kleur'],
+                    "sort_priority": sort_priority, # BELANGRIJK: dit veld wordt nu meegegeven!
+                }
+                events.append(event)
+    return events
 
-data = load_data()
-rooster_data = data.get("rooster_data", {})
-bereikbaarheden = data.get("bereikbaarheden", {})
-
-# =========================================================================
-#                   EVENTS BOUWEN
-# =========================================================================
-
-events = []
-
-for datum_key, dag_info in rooster_data.items():
-    for medewerker, werkplek in dag_info.items():
-        # Kleur bepalen
-        if werkplek == "Kantoor":
-            kleur = "#28A745"  # Groen
-        elif werkplek == "Vakantie/Verlof":
-            kleur = "#FFC107"  # Geel
-        elif werkplek == "Niet ingepland":
-            kleur = "#495057"  # Grijs
-        else:
-            kleur = "#007BFF"  # Blauw (voor alle overige werkplekken)
-
-        info = WERKPLEK_MAP.get(werkplek, WERKPLEK_MAP[DEFAULT_WERKPLEK])
-        events.append({
-            "title": f"{info['emoji']} {medewerker}",
-            "start": datum_key,
-            "allDay": True,
-            "backgroundColor": kleur,
-            "textColor": "#FFFFFF"
-        })
-
-# Bereikbaarheid indicatoren per dag
-for datum_key in set(rooster_data.keys()).union(bereikbaarheden.keys()):
-    dag_bereikbaar = bereikbaarheden.get(datum_key, {})
-    indicatoren = ""
-
-    for disc, letter in zip(["digi", "intel", "leiding", "tactiek"], ["D", "I", "L", "T"]):
-        persoon = dag_bereikbaar.get(disc)
-        if persoon:
-            indicatoren += f"✅{letter} "
-        else:
-            indicatoren += f"❌{letter} "
-
-    events.append({
-        "title": indicatoren.strip(),
-        "start": datum_key,
-        "allDay": True,
-        "backgroundColor": "transparent",
-        "textColor": "#FFFFFF"
-    })
-
-# =========================================================================
-#                   KALENDER WEERGAVE
-# =========================================================================
-
-calendar_options = {
-    "initialView": "dayGridMonth",
-    "locale": "nl",
-    "height": 800,
-    "eventDisplay": 'block'
-}
-
-calendar(events=events, options=calendar_options, key="maandoverzicht")
+calendar(
+    events=build_events_list(),
+    options={
+        "headerToolbar": {"left": "prev,next today", "center": "title", "right": "dayGridMonth,timeGridWeek"},
+        "initialView": "dayGridMonth",
+        "locale": "nl", "height": 800,
+        "eventDisplay": 'block',
+        
+        # --- DE FIX: Vertel de kalender hoe hij events moet sorteren ---
+        # Sorteer eerst op ons eigen 'sort_priority' veld, en daarna alfabetisch op titel.
+        "eventOrder": "sort_priority, title"
+    }
+)
