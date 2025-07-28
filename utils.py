@@ -9,7 +9,6 @@ import calendar as py_cal
 DATA_FILE = "data.json"
 
 # --- CONSTANTEN DEFINITIES ---
-# Deze worden één keer gedefinieerd en in de session state geplaatst.
 def setup_constants():
     st.session_state.MEDEWERKERS = ["Jan", "Emma", "Sophie", "Tom", "Lisa", "Daan", "Eva", "Milan", "Laura", "Rob", "Julia", "Sam", "Sanne", "Thijs", "Noa", "Lars", "Puck", "Bas", "Vera", "Nina"]
     st.session_state.WERKPLEKKEN_CONFIG = [
@@ -31,6 +30,8 @@ def setup_constants():
         "Belangrijk": "⚠️",
         "Laat": "🏃"
     }
+    # --- NIEUW: Definieer de auteurs voor notities ---
+    st.session_state.NOTE_AUTHORS = ["-- Algemene Notitie --"] + st.session_state.MEDEWERKERS
 
 # --- DATA PERSISTENTIE ---
 def save_all_data():
@@ -68,7 +69,7 @@ def initialize_session_state():
 
 # --- KERNLOGICA ---
 def update_rooster_entry(datum, medewerker, werkplek):
-    """Berekent beschikbaarheid o.b.v. VASTE disciplines en werkplek."""
+    # (Deze functie is ongewijzigd)
     datum_str = datum.strftime("%Y-%m-%d") if isinstance(datum, datetime.date) else datum
     
     st.session_state.rooster_data.setdefault(datum_str, {})
@@ -92,7 +93,7 @@ def update_rooster_entry(datum, medewerker, werkplek):
         st.session_state.beschikbaarheid_data[datum_str].pop(medewerker, None)
 
 def get_maand_voltooiing_percentage(year, month):
-    """Berekent hoe compleet het rooster is voor een gegeven maand."""
+    # (Deze functie is ongewijzigd)
     _, num_days = py_cal.monthrange(year, month)
     werkdagen = 0
     totaal_ingepland = 0
@@ -100,7 +101,7 @@ def get_maand_voltooiing_percentage(year, month):
 
     for day in range(1, num_days + 1):
         datum = datetime.date(year, month, day)
-        if datum.weekday() < 5:  # Ma-Vr
+        if datum.weekday() < 5:
             werkdagen += 1
             datum_str = datum.strftime("%Y-%m-%d")
             dag_rooster = st.session_state.rooster_data.get(datum_str, {})
@@ -112,12 +113,9 @@ def get_maand_voltooiing_percentage(year, month):
     max_planning = werkdagen * len(st.session_state.MEDEWERKERS)
     percentage = (totaal_ingepland / max_planning) * 100 if max_planning > 0 else 0
     
-    onvolledig = {
-        "Medewerker": [],
-        "Ingeplande Dagen": []
-    }
+    onvolledig = {"Medewerker": [], "Ingeplande Dagen": []}
     for medewerker, dagen in medewerker_planning.items():
-        if dagen < werkdagen * 0.7:  # drempel van 70%
+        if werkdagen > 0 and dagen < werkdagen * 0.7:
             onvolledig["Medewerker"].append(medewerker)
             onvolledig["Ingeplande Dagen"].append(f"{dagen} / {werkdagen}")
 
