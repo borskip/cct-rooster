@@ -1,5 +1,3 @@
-# Sla dit bestand op in de 'pages' map als 4_📝_Notities_van_de_Dag.py
-
 import streamlit as st
 import datetime
 import uuid
