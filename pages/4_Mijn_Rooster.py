@@ -7,23 +7,20 @@ from collections import defaultdict
 
 initialize_session_state()
 
-st.set_page_config(page_title="Mijn Rooster", layout="wide") # Layout naar 'wide' voor betere kolomweergave
+st.set_page_config(page_title="Mijn Rooster", layout="wide")
 st.title("👤 Mijn Rooster")
 
-# Haal constanten en data op
-MEDEWERKERS = st.session_state.MEDEWERKERS
-WERKPLEK_MAP = st.session_state.WERKPLEK_MAP
-NIET_WERKEND_STATUS = st.session_state.NIET_WERKEND_STATUS
+# --- LOGIN CHECK ---
+if not st.session_state.get('logged_in_user'):
+    st.warning("U moet ingelogd zijn om deze pagina te bekijken.")
+    st.info("Ga naar de 'Invoeren Rooster' pagina om in te loggen.")
+    st.stop()
 
-# Selecteer de medewerker
-geselecteerde_medewerker = st.selectbox(
-    "Selecteer je naam om je persoonlijke rooster te zien:",
-    options=MEDEWERKERS,
-    index=None,
-    placeholder="Kies je naam..."
-)
-
+# Gebruik direct de ingelogde gebruiker
+geselecteerde_medewerker = st.session_state.logged_in_user
+st.header(f"Planning voor {geselecteerde_medewerker}")
 st.divider()
+
 
 if geselecteerde_medewerker:
     # Bepaal de periode: huidige en volgende maand
