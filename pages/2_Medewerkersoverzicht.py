@@ -7,6 +7,11 @@ import pandas as pd
 from utils import initialize_session_state
 
 initialize_session_state()
+# Voeg dit toe aan de top van ELK bestand in de 'pages' map
+if not st.session_state.get('logged_in_user'):
+    st.warning("U moet ingelogd zijn om deze pagina te bekijken.")
+    st.info("Ga naar de **'Invoeren Rooster'** pagina om in te loggen.")
+    st.stop()
 
 st.set_page_config(page_title="Medewerkersoverzicht", layout="wide")
 st.title("🧑‍🤝‍🧑 Medewerkersoverzicht")
