@@ -5,9 +5,18 @@ import json
 import os
 import datetime
 import calendar as py_cal
+import uuid
+import holidays # <-- NIEUWE IMPORT
 
 DATA_FILE = "data.json"
 
+# --- DE NIEUWE FEESTDAGEN FUNCTIE ---
+def get_dutch_holiday_name(datum):
+    """Geeft de naam van de Nederlandse feestdag terug als de datum een feestdag is, anders None."""
+    nl_holidays = holidays.Netherlands()
+    return nl_holidays.get(datum)
+
+# --- De rest van je utils.py code ---
 def setup_constants():
     st.session_state.MEDEWERKERS = ["Jan", "Emma", "Sophie", "Tom", "Lisa", "Daan", "Eva", "Milan", "Laura", "Rob", "Julia", "Sam", "Sanne", "Thijs", "Noa", "Lars", "Puck", "Bas", "Vera", "Nina"]
     st.session_state.TEAMLEIDERS = ["Emma", "Tom"]
@@ -40,7 +49,9 @@ def save_all_data():
         "medewerker_skills": st.session_state.medewerker_skills,
         "notes_data": st.session_state.notes_data,
         "rooster_vastgesteld": st.session_state.rooster_vastgesteld,
-        "wijzigingsverzoeken": st.session_state.wijzigingsverzoeken
+        "wijzigingsverzoeken": st.session_state.wijzigingsverzoeken,
+        "open_diensten": st.session_state.open_diensten,
+        "team_events": st.session_state.team_events
     }
     with open(DATA_FILE, "w") as f:
         json.dump(data_to_save, f, indent=4)
@@ -63,9 +74,18 @@ def initialize_session_state():
         st.session_state.notes_data = loaded_data.get("notes_data", {})
         st.session_state.rooster_vastgesteld = loaded_data.get("rooster_vastgesteld", {})
         st.session_state.wijzigingsverzoeken = loaded_data.get("wijzigingsverzoeken", {})
+        st.session_state.open_diensten = loaded_data.get("open_diensten", [])
+        st.session_state.team_events = loaded_data.get("team_events", [])
         st.session_state.logged_in_user = None
         st.session_state.user_role = None
         st.session_state.app_initialized = True
+
+def get_team_event_for_date(datum):
+    datum_str = datum.strftime("%Y-%m-%d")
+    for event in st.session_state.get('team_events', []):
+        if event['datum'] == datum_str:
+            return event['beschrijving']
+    return None
 
 def update_rooster_entry(datum, medewerker, werkplek):
     datum_str = datum.strftime("%Y-%m-%d") if isinstance(datum, datetime.date) else datum
@@ -83,20 +103,30 @@ def update_rooster_entry(datum, medewerker, werkplek):
     else:
         st.session_state.beschikbaarheid_data[datum_str].pop(medewerker, None)
 
+def add_note_for_day(datum, auteur, categorie, tekst):
+    datum_str = datum.strftime("%Y-%m-%d")
+    if datum_str not in st.session_state.notes_data:
+        st.session_state.notes_data[datum_str] = []
+    nieuwe_notitie = {
+        "id": str(uuid.uuid4()), "auteur": auteur, "categorie": categorie, "tekst": tekst,
+        "timestamp": datetime.datetime.now().isoformat()
+    }
+    st.session_state.notes_data[datum_str].append(nieuwe_notitie)
+    save_all_data()
+
 def get_maand_voltooiing_percentage(year, month):
     _, num_days = py_cal.monthrange(year, month)
     werkdagen, totaal_ingepland = 0, 0
     medewerker_planning = {m: 0 for m in st.session_state.MEDEWERKERS}
     for day in range(1, num_days + 1):
         datum = datetime.date(year, month, day)
-        if datum.weekday() < 5:
-            werkdagen += 1
-            datum_str = datum.strftime("%Y-%m-%d")
-            dag_rooster = st.session_state.rooster_data.get(datum_str, {})
-            for m in st.session_state.MEDEWERKERS:
-                if m in dag_rooster and dag_rooster[m] not in st.session_state.NIET_WERKEND_STATUS:
-                    totaal_ingepland += 1
-                    medewerker_planning[m] += 1
+        if datum.weekday() < 5: werkdagen += 1
+        datum_str = datum.strftime("%Y-%m-%d")
+        dag_rooster = st.session_state.rooster_data.get(datum_str, {})
+        for m in st.session_state.MEDEWERKERS:
+            if m in dag_rooster and dag_rooster[m] not in st.session_state.NIET_WERKEND_STATUS:
+                totaal_ingepland += 1
+                medewerker_planning[m] += 1
     max_planning = werkdagen * len(st.session_state.MEDEWERKERS) if werkdagen > 0 else 1
     percentage = (totaal_ingepland / max_planning) * 100 if max_planning > 0 else 0
     onvolledig = {"Medewerker": [], "Ingeplande Dagen": []}
@@ -105,3 +135,15 @@ def get_maand_voltooiing_percentage(year, month):
             onvolledig["Medewerker"].append(m)
             onvolledig["Ingeplande Dagen"].append(f"{d} / {werkdagen}")
     return percentage, onvolledig
+
+def get_day_stats(datum):
+    datum_str = datum.strftime("%Y-%m-%d")
+    dag_rooster = st.session_state.rooster_data.get(datum_str, {})
+    dag_beschikbaarheid = st.session_state.beschikbaarheid_data.get(datum_str, {})
+    kantoor_count = sum(1 for werkplek in dag_rooster.values() if werkplek == "Kantoor")
+    gedekte_skills = {skill: False for skill in st.session_state.SKILLS_BEREIKBAARHEID}
+    for details in dag_beschikbaarheid.values():
+        for skill, is_actief in details.items():
+            if skill in gedekte_skills and is_actief:
+                gedekte_skills[skill] = True
+    return kantoor_count, gedekte_skills
