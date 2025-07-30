@@ -10,7 +10,9 @@ from utils import (
     initialize_session_state,
     update_rooster_entry,
     save_all_data,
-    get_maand_voltooiing_percentage
+    get_maand_voltooiing_percentage,
+    get_day_stats,
+    get_team_event_for_date  # Nieuwe functie geïmporteerd
 )
 
 initialize_session_state()
@@ -55,76 +57,117 @@ else:
 
     st.divider()
     st.header("Invoertools")
-
-    with st.expander("⚙️ Werkpatronen instellen en toepassen", expanded=True):
-        with st.form(key="pattern_form"):
-            medewerker_patroon = st.selectbox("Selecteer medewerker:", st.session_state.MEDEWERKERS, key="patroon_medewerker")
-            huidig_patroon = st.session_state.user_patterns.get(medewerker_patroon, {})
-            
-            st.write(f"**Weekpatroon voor {medewerker_patroon}:**")
-            cols = st.columns(7)
-            nieuw_patroon = {}
-            for i, dag in enumerate(["Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo"]):
-                with cols[i]:
-                    default = huidig_patroon.get(i, "Niet aan het werk")
-                    index = st.session_state.WERKPLEK_NAMEN.index(default)
-                    nieuw_patroon[i] = st.selectbox(dag, st.session_state.WERKPLEK_NAMEN, index=index, key=f"patroon_{medewerker_patroon}_{i}")
-            
-            c1_form, c2_form = st.columns(2)
-            save_pattern = c1_form.form_submit_button("💾 Sla patroon op")
-            apply_pattern = c2_form.form_submit_button("📆 Pas patroon toe op huidige maand")
-
-            if save_pattern:
-                st.session_state.user_patterns[medewerker_patroon] = nieuw_patroon
-                save_all_data()
-                st.success(f"Patroon opgeslagen voor {medewerker_patroon}.")
-
-            if apply_pattern:
-                patroon = st.session_state.user_patterns.get(medewerker_patroon)
-                if not patroon:
-                     st.warning(f"Sla eerst een patroon op voor {medewerker_patroon}.")
-                else:
-                    vandaag = datetime.date.today()
-                    _, dagen_in_maand = py_cal.monthrange(vandaag.year, vandaag.month)
-                    for dag_nummer in range(1, dagen_in_maand + 1):
-                        datum = datetime.date(vandaag.year, vandaag.month, dag_nummer)
-                        werkplek = patroon.get(datum.weekday(), "Niet aan het werk")
-                        update_rooster_entry(datum, medewerker_patroon, werkplek)
-                    save_all_data()
-                    st.success(f"Patroon van {medewerker_patroon} toegepast op {vandaag.strftime('%B %Y')}.")
     
-    with st.expander("✍️ Individuele Dag Invoeren"):
-        col1_form, col2_form, col3_form = st.columns(3)
-        medewerker_invoer = col1_form.selectbox("Medewerker", st.session_state.MEDEWERKERS, key="invoer_medewerker")
-        datum_invoer = col2_form.date_input("Datum", datetime.date.today(), key="invoer_datum")
-        werkplek_invoer = col3_form.selectbox("Werkplek", st.session_state.WERKPLEK_NAMEN, key="invoer_werkplek")
+    # --- AANGEPASTE EXPANDER VOOR "JOUW DAG INPLANNEN" ---
+    with st.expander("✍️ Jouw Dag Inplannen", expanded=True):
+        medewerker_invoer = st.session_state.logged_in_user
         
+        col1_form, col2_form = st.columns(2)
+        with col1_form:
+            datum_invoer = st.date_input("Kies een datum", datetime.date.today(), key="invoer_datum")
+        with col2_form:
+            werkplek_invoer = st.selectbox("Kies je werkplek/dienst", st.session_state.WERKPLEK_NAMEN, key="invoer_werkplek")
+
+        # Integratie van Team Momenten check
+        if datum_invoer:
+            team_event = get_team_event_for_date(datum_invoer)
+            if team_event:
+                st.info(f"🗓️ **Team Moment:** Op deze dag is '{team_event}' gepland!", icon="❗")
+
+            with st.container(border=True):
+                kantoor_count, gedekte_skills = get_day_stats(datum_invoer)
+                status_cols = st.columns(len(st.session_state.SKILLS_BEREIKBAARHEID) + 1)
+                with status_cols[0]:
+                    st.markdown(f"**👥 Kantoor: {kantoor_count}**")
+                for i, skill in enumerate(st.session_state.SKILLS_BEREIKBAARHEID):
+                    with status_cols[i+1]:
+                        emoji = "✅" if gedekte_skills[skill] else "❌"
+                        st.markdown(f"{emoji} {skill}")
+
         maand_key_invoer = datum_invoer.strftime("%Y-%m")
         is_vastgesteld_invoer = st.session_state.rooster_vastgesteld.get(maand_key_invoer, False)
         
         if is_vastgesteld_invoer:
             st.warning("Let op: het rooster voor deze maand is vastgesteld. Een wijziging indienen leidt tot een verzoek.")
         
-        if st.button("💾 Opslaan of Aanvragen"):
-            if not is_vastgesteld_invoer:
-                update_rooster_entry(datum_invoer, medewerker_invoer, werkplek_invoer)
-                save_all_data()
-                st.success(f"Rooster bijgewerkt voor {medewerker_invoer} op {datum_invoer.strftime('%d-%m-%Y')}!")
-            else:
-                verzoek_id = str(uuid.uuid4())
-                if maand_key_invoer not in st.session_state.wijzigingsverzoeken:
-                    st.session_state.wijzigingsverzoeken[maand_key_invoer] = []
+        col_plan, col_view = st.columns(2)
+        with col_plan:
+            if st.button("💾 Plan mij in", type="primary"):
+                if not is_vastgesteld_invoer:
+                    update_rooster_entry(datum_invoer, medewerker_invoer, werkplek_invoer)
+                    save_all_data()
+                    st.success(f"Je bent ingepland voor {werkplek_invoer} op {datum_invoer.strftime('%d-%m-%Y')}!")
+                else:
+                    verzoek_id = str(uuid.uuid4())
+                    if maand_key_invoer not in st.session_state.wijzigingsverzoeken:
+                        st.session_state.wijzigingsverzoeken[maand_key_invoer] = []
+                    st.session_state.wijzigingsverzoeken[maand_key_invoer].append({
+                        "id": verzoek_id, "medewerker": medewerker_invoer, 
+                        "datum": datum_invoer.strftime("%Y-%m-%d"), "werkplek": werkplek_invoer
+                    })
+                    save_all_data()
+                    st.success("Wijzigingsverzoek ingediend!")
+                st.rerun()
+
+        with col_view:
+            with st.popover("👀 Wie is er dan?"):
+                # Integratie van Team Momenten in popover
+                team_event_popover = get_team_event_for_date(datum_invoer)
+                if team_event_popover:
+                    st.markdown(f"🗓️ **Team Moment: {team_event_popover}**")
+                    st.divider()
                 
-                st.session_state.wijzigingsverzoeken[maand_key_invoer].append({
-                    "id": verzoek_id,
-                    "medewerker": medewerker_invoer, 
-                    "datum": datum_invoer.strftime("%Y-%m-%d"),
-                    "werkplek": werkplek_invoer
-                })
+                datum_str = datum_invoer.strftime("%Y-%m-%d")
+                dag_rooster = st.session_state.rooster_data.get(datum_str, {})
+                werkende_collegas = {m: w for m, w in dag_rooster.items() if w not in st.session_state.NIET_WERKEND_STATUS}
+
+                if not werkende_collegas:
+                    st.info("Nog niemand ingepland op deze dag.")
+                else:
+                    st.markdown(f"**Aanwezig op {datum_invoer.strftime('%d-%m-%Y')}:**")
+                    for medewerker, werkplek in sorted(werkende_collegas.items()):
+                        werkplek_info = st.session_state.WERKPLEK_MAP.get(werkplek, {
+                            "kleur": "#6c757d", "tekstkleur": "#ffffff", "afkorting": "AANW"
+                        })
+                        st.markdown(f"""
+                        <div style='display: flex; align-items: center; margin-bottom: 5px;'>
+                            <span style='background-color: {werkplek_info["kleur"]}; color: {werkplek_info["tekstkleur"]}; padding: 2px 5px; border-radius: 4px; font-weight: bold; font-family: monospace; margin-right: 8px;'>
+                                {werkplek_info["afkorting"]}
+                            </span>
+                            <span>{medewerker} ({werkplek})</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+    with st.expander("⚙️ Jouw Werkpatroon instellen en toepassen"):
+        with st.form(key="pattern_form"):
+            medewerker_patroon = st.session_state.logged_in_user
+            huidig_patroon = st.session_state.user_patterns.get(medewerker_patroon, {})
+            st.write(f"**Stel hier jouw standaard weekpatroon in, {medewerker_patroon}:**")
+            cols = st.columns(7)
+            nieuw_patroon = {}
+            for i, dag in enumerate(["Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo"]):
+                with cols[i]:
+                    default = huidig_patroon.get(str(i), "Niet aan het werk") # Ensure key is string if loaded from JSON
+                    index = st.session_state.WERKPLEK_NAMEN.index(default)
+                    nieuw_patroon[i] = st.selectbox(dag, st.session_state.WERKPLEK_NAMEN, index=index, key=f"patroon_{medewerker_patroon}_{i}")
+            c1, c2 = st.columns(2)
+            if c1.form_submit_button("💾 Sla mijn patroon op"):
+                st.session_state.user_patterns[medewerker_patroon] = nieuw_patroon
                 save_all_data()
-                st.success("Wijzigingsverzoek ingediend ter goedkeuring!")
-                st.info("De teamleider kan het verzoek goedkeuren onder 'Teamleiderbeheer'.")
-            st.rerun()
+                st.success(f"Jouw patroon is opgeslagen, {medewerker_patroon}.")
+            if c2.form_submit_button("📆 Pas mijn patroon toe op huidige maand"):
+                patroon = st.session_state.user_patterns.get(medewerker_patroon)
+                if not patroon:
+                    st.warning(f"Sla eerst een patroon op, {medewerker_patroon}.")
+                else:
+                    vandaag = datetime.date.today()
+                    _, dagen_in_maand = py_cal.monthrange(vandaag.year, vandaag.month)
+                    for dag_nummer in range(1, dagen_in_maand + 1):
+                        datum = datetime.date(vandaag.year, vandaag.month, dag_nummer)
+                        werkplek = patroon.get(str(datum.weekday()), "Niet aan het werk") # Ensure key is string
+                        update_rooster_entry(datum, medewerker_patroon, werkplek)
+                    save_all_data()
+                    st.success(f"Jouw patroon is toegepast op {vandaag.strftime('%B %Y')}.")
 
     with st.expander("🧑‍🎓 Jouw Disciplines Beheren"):
         with st.form(key=f"skill_form_{st.session_state.logged_in_user}"):
@@ -142,16 +185,63 @@ else:
 
     st.divider()
 
+    with st.expander("🤝 Team Inzet Organiseren"):
+        st.info("Creëer een oproep voor een bijzondere inzet. Je collega's kunnen zich vervolgens aanmelden voor de disciplines die jij nodig hebt.")
+        
+        with st.form("bijzondere_inzet_form", clear_on_submit=True):
+            inzet_maker = st.session_state.logged_in_user
+            inzet_beschrijving = st.text_input("Beschrijving van de inzet", placeholder="Bijv: Ondersteuning ME locatie X, Spoedklus Y")
+            
+            c1_form, c2_form = st.columns(2)
+            with c1_form:
+                inzet_datum = st.date_input("Datum van de inzet", min_value=datetime.date.today())
+            with c2_form:
+                st.write("**Hoeveel mensen heb je nodig per discipline?** (Laat op 0 als niet van toepassing)")
+
+            behoefte = {}
+            skill_cols = st.columns(len(st.session_state.SKILLS_BEREIKBAARHEID))
+            for i, skill in enumerate(st.session_state.SKILLS_BEREIKBAARHEID):
+                with skill_cols[i]:
+                    behoefte[skill] = st.number_input(skill, min_value=0, value=0, step=1, key=f"need_{skill}")
+
+            if st.form_submit_button("📢 Plaats Oproep", type="primary"):
+                if not inzet_beschrijving:
+                    st.warning("Geef een beschrijving van de inzet op.")
+                elif sum(behoefte.values()) == 0:
+                    st.warning("Geef aan hoeveel mensen je nodig hebt voor minstens één discipline.")
+                else:
+                    gefilterde_behoefte = {s: v for s, v in behoefte.items() if v > 0}
+                    
+                    nieuwe_inzet = {
+                        "id": str(uuid.uuid4()),
+                        "maker": inzet_maker,
+                        "datum": inzet_datum.strftime("%Y-%m-%d"),
+                        "werkplek": inzet_beschrijving,
+                        "behoefte": gefilterde_behoefte,
+                        "aanmeldingen": {skill: [] for skill in gefilterde_behoefte},
+                        "status": "open"
+                    }
+                    st.session_state.open_diensten.append(nieuwe_inzet)
+                    save_all_data()
+                    st.success(f"Oproep geplaatst voor {inzet_beschrijving} op {inzet_datum.strftime('%d-%m-%Y')}.")
+                    
     if st.session_state.user_role == 'Teamleider':
         with st.expander("👑 Teamleiderbeheer", expanded=False):
             maand_opties = [(datetime.date(datetime.date.today().year, m, 1)) for m in range(1, 13)]
-            geselecteerde_datum = st.selectbox("Selecteer een maand voor beheer:", options=maand_opties, format_func=lambda date: date.strftime('%B %Y'), index=datetime.date.today().month - 1)
+            geselecteerde_datum = st.selectbox(
+                "Selecteer een maand voor beheer:", 
+                options=maand_opties, 
+                format_func=lambda date: date.strftime('%B %Y'), 
+                index=datetime.date.today().month - 1,
+                key="teamleider_maand_select"
+            )
             maand_key_beheer = geselecteerde_datum.strftime("%Y-%m")
+            
             tab1, tab2 = st.tabs(["Voortgang & Vaststellen", "Wijzigingsverzoeken"])
+
             with tab1:
                 st.subheader(f"Status voor {geselecteerde_datum.strftime('%B %Y')}")
-                year = geselecteerde_datum.year
-                month_num = geselecteerde_datum.month
+                year, month_num = geselecteerde_datum.year, geselecteerde_datum.month
                 compleetheid, onvolledig_ingepland = get_maand_voltooiing_percentage(year, month_num)
                 st.progress(compleetheid / 100, text=f"Rooster is voor {compleetheid:.1f}% gevuld.")
                 if onvolledig_ingepland["Medewerker"]:
@@ -208,9 +298,56 @@ else:
                 st.session_state.notes_data = {}
                 st.session_state.wijzigingsverzoeken = {}
                 st.session_state.rooster_vastgesteld = {}
+                st.session_state.open_diensten = []
+                st.session_state.team_events = [] # Ook team events legen
                 save_all_data()
                 st.success("Alle roosterdata, notities en verzoeken zijn verwijderd.")
                 st.rerun()
         with col2_del:
-            # Code voor demo-data generatie is hier weggelaten voor duidelijkheid
-            pass
+            if st.button("Optioneel: Genereer demo-data"):
+                st.session_state.rooster_data = {}
+                st.session_state.beschikbaarheid_data = {}
+                st.session_state.notes_data = {}
+                st.session_state.medewerker_skills = {}
+                st.session_state.open_diensten = []
+                st.session_state.team_events = []
+                for medewerker in st.session_state.MEDEWERKERS:
+                    num_skills = random.randint(1, 2)
+                    toegekende_skills = random.sample(st.session_state.SKILLS_BEREIKBAARHEID, num_skills)
+                    st.session_state.medewerker_skills[medewerker] = {s: (s in toegekende_skills) for s in st.session_state.SKILLS_BEREIKBAARHEID}
+                start_datum = datetime.date.today() - datetime.timedelta(days=90)
+                eind_datum = datetime.date.today() + datetime.timedelta(days=90)
+                totaal_dagen = (eind_datum - start_datum).days + 1
+                progress_bar = st.progress(0, text="Slim rooster genereren...")
+                for i in range(totaal_dagen):
+                    huidige_dag = start_datum + datetime.timedelta(days=i)
+                    dag_index = huidige_dag.weekday()
+                    kantoor_doel = 0
+                    if dag_index in [1, 2, 3]: kantoor_doel = 15
+                    elif dag_index == 0: kantoor_doel = 8
+                    beschikbare_medewerkers = st.session_state.MEDEWERKERS.copy()
+                    random.shuffle(beschikbare_medewerkers)
+                    kantoor_medewerkers = []
+                    if kantoor_doel > 0:
+                        kantoor_medewerkers = beschikbare_medewerkers[:kantoor_doel]
+                        for medewerker in kantoor_medewerkers:
+                            update_rooster_entry(huidige_dag, medewerker, "Kantoor")
+                    overige_medewerkers = [m for m in beschikbare_medewerkers if m not in kantoor_medewerkers]
+                    for medewerker in overige_medewerkers:
+                        werkplek = "Niet aan het werk"
+                        if dag_index >= 5:
+                            if random.random() < 0.05:
+                               werkplek = random.choice(["Aan het werk", "Actiedag"])
+                        else:
+                            is_vakantie = (huidige_dag.month in [7, 8] and random.random() < 0.25) or (huidige_dag.month not in [7, 8] and random.random() < 0.07)
+                            if is_vakantie: werkplek = "Vakantie"
+                            elif random.random() > 0.15:
+                                werkplek_opties = [w['naam'] for w in st.session_state.WERKPLEKKEN_CONFIG if w['naam'] not in ["Kantoor"] + st.session_state.NIET_WERKEND_STATUS]
+                                werkplek = random.choice(werkplek_opties)
+                        if werkplek != "Niet aan het werk":
+                             update_rooster_entry(huidige_dag, medewerker, werkplek)
+                    progress_bar.progress((i + 1) / totaal_dagen, text=f"Rooster voor {huidige_dag.strftime('%d-%m-%Y')} gevuld...")
+                save_all_data()
+                progress_bar.empty()
+                st.success("Fictieve data is gegenereerd!")
+                st.rerun()
