@@ -6,13 +6,20 @@ import uuid
 import calendar as py_cal
 import random
 
+# Probeer pandas te importeren, geef een foutmelding als het niet lukt
+try:
+    import pandas as pd
+except ImportError:
+    st.error("De 'pandas' library is niet geïnstalleerd. Installeer deze a.u.b. met het commando: pip install pandas")
+    st.stop()
+
 from utils import (
     initialize_session_state,
     update_rooster_entry,
     save_all_data,
     get_maand_voltooiing_percentage,
     get_day_stats,
-    get_team_event_for_date  # Nieuwe functie geïmporteerd
+    get_team_event_for_date
 )
 
 initialize_session_state()
@@ -20,6 +27,7 @@ initialize_session_state()
 st.set_page_config(page_title="Invoeren Rooster", page_icon="✍️", layout="wide")
 
 # --- AUTHENTICATIE LOGICA ---
+# Als er niemand is ingelogd, toon het login scherm
 if not st.session_state.get('logged_in_user'):
     st.title("🔒 Inloggen Rooster App")
     st.write("Selecteer je naam en voer het wachtwoord in om verder te gaan.")
@@ -37,6 +45,7 @@ if not st.session_state.get('logged_in_user'):
             st.rerun()
         else:
             st.error("Naam en/of wachtwoord is incorrect.")
+# ALS ER WEL IEMAND IS INGELOGD, TOON DE APP
 else:
     # --- HOOFDPAGINA CONTENT (ALS INGELOGD) ---
     st.sidebar.success(f"Ingelogd als: **{st.session_state.logged_in_user}**")
@@ -58,7 +67,7 @@ else:
     st.divider()
     st.header("Invoertools")
     
-    # --- AANGEPASTE EXPANDER VOOR "JOUW DAG INPLANNEN" ---
+    # --- EXPANDER 1: JOUW DAG INPLANNEN ---
     with st.expander("✍️ Jouw Dag Inplannen", expanded=True):
         medewerker_invoer = st.session_state.logged_in_user
         
@@ -68,7 +77,6 @@ else:
         with col2_form:
             werkplek_invoer = st.selectbox("Kies je werkplek/dienst", st.session_state.WERKPLEK_NAMEN, key="invoer_werkplek")
 
-        # Integratie van Team Momenten check
         if datum_invoer:
             team_event = get_team_event_for_date(datum_invoer)
             if team_event:
@@ -111,7 +119,6 @@ else:
 
         with col_view:
             with st.popover("👀 Wie is er dan?"):
-                # Integratie van Team Momenten in popover
                 team_event_popover = get_team_event_for_date(datum_invoer)
                 if team_event_popover:
                     st.markdown(f"🗓️ **Team Moment: {team_event_popover}**")
@@ -138,112 +145,84 @@ else:
                         </div>
                         """, unsafe_allow_html=True)
 
-# ==============================================================================
-# VERVANG DE VOLLEDIGE "JOUW WERKPATROON" EXPANDER MET DEZE CODE
-# ==============================================================================
+    # --- EXPANDER 2: WERKPATROON INSTELLEN (NIEUWE CODE) ---
     with st.expander("⚙️ Jouw Werkpatroon instellen en toepassen"):
         medewerker_patroon = st.session_state.logged_in_user
 
-        # --- Deel 1: Patroon instellen en opslaan ---
         with st.form(key="pattern_save_form"):
             st.write(f"**Stap 1: Stel hier jouw standaard weekpatroon in, {medewerker_patroon}.**")
             huidig_patroon = st.session_state.user_patterns.get(medewerker_patroon, {})
-        
+            
             cols = st.columns(7)
             nieuw_patroon = {}
             dagen_namen = ["Maandag", "Dinsdag", "Woensdag", "Donderdag", "Vrijdag", "Zaterdag", "Zondag"]
-        
+            
             for i, dag_naam in enumerate(dagen_namen):
                 with cols[i]:
-                    # We gebruiken het weekdagnummer (0=Maandag) als sleutel
                     default_werkplek = huidig_patroon.get(str(i), "Niet aan het werk")
                     try:
-                        # Zoek de index van de default werkplek in de lijst
                         index = st.session_state.WERKPLEK_NAMEN.index(default_werkplek)
                     except ValueError:
-                        # Als de opgeslagen werkplek niet meer bestaat, val terug op 'Niet aan het werk'
                         index = st.session_state.WERKPLEK_NAMEN.index("Niet aan het werk")
-                
+                    
                     nieuw_patroon[str(i)] = st.selectbox(dag_naam[:2], st.session_state.WERKPLEK_NAMEN, index=index, key=f"patroon_{medewerker_patroon}_{i}")
 
             if st.form_submit_button("💾 Sla mijn patroon op", type="primary"):
                 st.session_state.user_patterns[medewerker_patroon] = nieuw_patroon
                 save_all_data()
                 st.success(f"Jouw patroon is opgeslagen, {medewerker_patroon}.")
-                # Een kleine rerun kan helpen om de 'default' waarden direct bij te werken
                 st.rerun()
 
         st.divider()
 
-        # --- Deel 2: Opgeslagen patroon toepassen op een periode ---
         st.write(f"**Stap 2: Pas je opgeslagen patroon toe op het rooster.**")
-    
+        
         patroon = st.session_state.user_patterns.get(medewerker_patroon)
 
         if not patroon:
             st.warning("Je hebt nog geen patroon opgeslagen. Doe dat eerst hierboven.")
         else:
-            # Toon het opgeslagen patroon ter referentie
             st.write("Jouw huidige opgeslagen patroon:")
             patroon_cols = st.columns(7)
             for i, dag_naam in enumerate(dagen_namen):
                 werkplek = patroon.get(str(i), "N.v.t.")
                 patroon_cols[i].metric(label=dag_naam, value=werkplek)
 
-            # Flexibele periode selectie
             today = datetime.date.today()
-            #timedelta is handiger voor een vaste periode zoals 6 maanden (ca. 182 dagen)
-            six_months_later = today + datetime.timedelta(days=182) 
-        
+            six_months_later = today + datetime.timedelta(days=182)
+            
             col_start, col_end = st.columns(2)
             with col_start:
                 start_datum = st.date_input("Startdatum", value=today)
             with col_end:
                 eind_datum = st.date_input("Einddatum", value=six_months_later)
-        
+            
             if start_datum > eind_datum:
                 st.error("De startdatum kan niet na de einddatum liggen.")
             elif st.button("📆 Pas patroon toe op geselecteerde periode", type="primary"):
-                import pandas as pd # Importeer pandas hier, of bovenaan je script
-
-                # Genereer alle datums in de geselecteerde periode
                 datums_in_periode = pd.date_range(start_datum, eind_datum)
                 updates_gedaan = 0
-            
-                # Gebruik een progress bar voor een betere gebruikerservaring
+                
                 progress_text = "Patroon wordt toegepast op het rooster..."
                 my_bar = st.progress(0, text=progress_text)
 
                 for i, dag in enumerate(datums_in_periode):
-                    # .weekday() geeft 0 voor Maandag, ..., 6 voor Zondag
                     weekdag_nummer = str(dag.weekday())
                     werkplek = patroon.get(weekdag_nummer, "Niet aan het werk")
-
-                    # Converteer pandas timestamp terug naar een datetime.date object
                     datum_voor_update = dag.date()
-                
-                    #Update de rooster entry in de session state (zonder direct op te slaan)
+                    
                     update_rooster_entry(datum_voor_update, medewerker_patroon, werkplek)
                     updates_gedaan += 1
-                
-                    # Update de progress bar
+                    
                     my_bar.progress((i + 1) / len(datums_in_periode), text=f"{progress_text} ({dag.strftime('%d-%m-%Y')})")
-            
-                # Sla ALLE data in één keer op NA de loop. Dit is veel sneller.
+                
                 save_all_data()
-            
-                my_bar.empty() # Verwijder de progress bar na voltooiing
+                
+                my_bar.empty()
                 st.success(f"✅ Jouw patroon is succesvol toegepast op **{updates_gedaan} dagen** in de periode van {start_datum.strftime('%d-%m-%Y')} tot {eind_datum.strftime('%d-%m-%Y')}.")
-            
-                # Forceer een 'rerun' van de app. Dit is de sleutel!
-                # Hierdoor wordt de hele app opnieuw geladen met de zojuist opgeslagen data,
-                # waardoor alle kalenders en overzichten direct up-to-date zijn.
                 st.rerun()
 
-# ==============================================================================
-# EINDE VAN HET TE VERVANGEN BLOK
-# ==============================================================================
-
+    # --- EXPANDER 3: JOUW DISCIPLINES BEHEREN ---
     with st.expander("🧑‍🎓 Jouw Disciplines Beheren"):
         with st.form(key=f"skill_form_{st.session_state.logged_in_user}"):
             st.write(f"Vink de disciplines aan die jij beheerst, **{st.session_state.logged_in_user}**:")
@@ -260,6 +239,7 @@ else:
 
     st.divider()
 
+    # --- EXPANDER 4: TEAM INZET ORGANISEREN ---
     with st.expander("🤝 Team Inzet Organiseren"):
         st.info("Creëer een oproep voor een bijzondere inzet. Je collega's kunnen zich vervolgens aanmelden voor de disciplines die jij nodig hebt.")
         
@@ -299,7 +279,9 @@ else:
                     st.session_state.open_diensten.append(nieuwe_inzet)
                     save_all_data()
                     st.success(f"Oproep geplaatst voor {inzet_beschrijving} op {inzet_datum.strftime('%d-%m-%Y')}.")
+                    st.rerun()
                     
+    # --- EXPANDER 5: TEAMLEIDERBEHEER (ALLEEN VOOR TEAMLEIDERS) ---
     if st.session_state.user_role == 'Teamleider':
         with st.expander("👑 Teamleiderbeheer", expanded=False):
             maand_opties = [(datetime.date(datetime.date.today().year, m, 1)) for m in range(1, 13)]
@@ -363,6 +345,7 @@ else:
                                     st.warning("Verzoek afgewezen.")
                                     st.rerun()
 
+    # --- EXPANDER 6: ROOSTERBEHEER (DATA RESET) ---
     with st.expander("🗑️ Roosterbeheer"):
         st.warning("Let op: het verwijderen van alle roosterdata kan niet ongedaan worden gemaakt.")
         col1_del, col2_del = st.columns(2)
@@ -374,12 +357,13 @@ else:
                 st.session_state.wijzigingsverzoeken = {}
                 st.session_state.rooster_vastgesteld = {}
                 st.session_state.open_diensten = []
-                st.session_state.team_events = [] # Ook team events legen
+                st.session_state.team_events = []
                 save_all_data()
                 st.success("Alle roosterdata, notities en verzoeken zijn verwijderd.")
                 st.rerun()
         with col2_del:
             if st.button("Optioneel: Genereer demo-data"):
+                # Code voor demo-data generatie is hier ongewijzigd gelaten
                 st.session_state.rooster_data = {}
                 st.session_state.beschikbaarheid_data = {}
                 st.session_state.notes_data = {}
