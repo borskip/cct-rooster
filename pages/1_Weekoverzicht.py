@@ -1,11 +1,9 @@
 # Sla dit bestand op in de 'pages' map als 1_🗓️_Weekoverzicht.py
-
 import streamlit as st
 import datetime
-from utils import initialize_session_state
+from utils import initialize_session_state, get_team_event_for_date, get_dutch_holiday_name
 
 initialize_session_state()
-# Voeg dit toe aan de top van ELK bestand in de 'pages' map
 if not st.session_state.get('logged_in_user'):
     st.warning("U moet ingelogd zijn om deze pagina te bekijken.")
     st.info("Ga naar de **'Invoeren Rooster'** pagina om in te loggen.")
@@ -15,12 +13,13 @@ st.set_page_config(page_title="Weekoverzicht", layout="wide")
 st.title("🗓️ Weekoverzicht")
 
 if not st.session_state.rooster_data and not st.session_state.notes_data:
-    st.info("Er is nog geen roosterdata. Ga naar het 'Controlepaneel' om het rooster te vullen.")
+    st.info("Er is nog geen roosterdata.")
     st.stop()
 
 WERKPLEK_MAP = st.session_state.WERKPLEK_MAP
 SKILLS_BEREIKBAARHEID = st.session_state.SKILLS_BEREIKBAARHEID
 NIET_WERKEND_STATUS = st.session_state.NIET_WERKEND_STATUS
+NOTE_CATEGORIES = st.session_state.NOTE_CATEGORIES
 
 def format_medewerker_display(medewerker, werkplek_info):
     bg_color = werkplek_info.get('kleur', '#f0f2f6')
@@ -45,27 +44,43 @@ for i in range(7):
     dag_naam = huidige_dag.strftime("%A").capitalize()
 
     with st.expander(f"**{dag_naam} {huidige_dag.strftime('%d-%m-%Y')}**", expanded=True):
+        
+        # --- MARKERINGEN TOEVOEGEN ---
+        holiday_name = get_dutch_holiday_name(huidige_dag)
+        team_event = get_team_event_for_date(huidige_dag)
+        
+        if holiday_name:
+            st.success(f"🎉 **Feestdag:** {holiday_name}")
+        if team_event:
+            st.info(f"🗓️ **Team Moment:** {team_event}")
+        # --- EINDE AANPASSING ---
+
         dag_beschikbaarheid = st.session_state.beschikbaarheid_data.get(datum_str, {})
         
         if huidige_dag.weekday() < 5:
             onbemande_skills = [s for s in SKILLS_BEREIKBAARHEID if not any(d.get(s, False) for d in dag_beschikbaarheid.values())]
-            if onbemande_skills:
-                st.error(f"❌ Geen bereikbare medewerker voor: **{', '.join(onbemande_skills)}**")
-            else:
-                st.success("✅ Alle disciplines zijn gedekt.")
+            if onbemande_skills: st.error(f"❌ Geen bereikbare medewerker voor: **{', '.join(onbemande_skills)}**")
+            else: st.success("✅ Alle disciplines zijn gedekt.")
         
         st.write("**Ingeplande medewerkers:**")
-        
         dag_rooster = st.session_state.rooster_data.get(datum_str, {})
         werkende_medewerkers = {m: w for m, w in dag_rooster.items() if w not in NIET_WERKEND_STATUS}
         
-        if not werkende_medewerkers:
-            st.write("Niemand ingeroosterd.")
+        if not werkende_medewerkers: st.write("Niemand ingeroosterd.")
         else:
             sorted_medewerkers = sorted(werkende_medewerkers.items(), key=lambda item: (WERKPLEK_MAP[item[1]]['display_group'], item[0]))
-            
             cols = st.columns(3)
             for idx, (medewerker, werkplek) in enumerate(sorted_medewerkers):
                 with cols[idx % 3]:
                     werkplek_info = WERKPLEK_MAP.get(werkplek, {})
                     st.markdown(format_medewerker_display(medewerker, werkplek_info), unsafe_allow_html=True)
+        
+        st.divider()
+        st.write("**Notities voor deze dag:**")
+        dag_notities = st.session_state.notes_data.get(datum_str, [])
+        if not dag_notities: st.caption("Geen notities.")
+        else:
+            for notitie in dag_notities:
+                emoji = NOTE_CATEGORIES.get(notitie['categorie'], "📄")
+                st.markdown(f"> {emoji} **{notitie['categorie']}** door **{notitie['auteur']}**")
+                st.text(notitie['tekst'])
