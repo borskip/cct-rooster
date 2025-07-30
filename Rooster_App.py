@@ -138,36 +138,111 @@ else:
                         </div>
                         """, unsafe_allow_html=True)
 
+# ==============================================================================
+# VERVANG DE VOLLEDIGE "JOUW WERKPATROON" EXPANDER MET DEZE CODE
+# ==============================================================================
     with st.expander("⚙️ Jouw Werkpatroon instellen en toepassen"):
-        with st.form(key="pattern_form"):
-            medewerker_patroon = st.session_state.logged_in_user
+        medewerker_patroon = st.session_state.logged_in_user
+
+        # --- Deel 1: Patroon instellen en opslaan ---
+        with st.form(key="pattern_save_form"):
+            st.write(f"**Stap 1: Stel hier jouw standaard weekpatroon in, {medewerker_patroon}.**")
             huidig_patroon = st.session_state.user_patterns.get(medewerker_patroon, {})
-            st.write(f"**Stel hier jouw standaard weekpatroon in, {medewerker_patroon}:**")
+        
             cols = st.columns(7)
             nieuw_patroon = {}
-            for i, dag in enumerate(["Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo"]):
+            dagen_namen = ["Maandag", "Dinsdag", "Woensdag", "Donderdag", "Vrijdag", "Zaterdag", "Zondag"]
+        
+            for i, dag_naam in enumerate(dagen_namen):
                 with cols[i]:
-                    default = huidig_patroon.get(str(i), "Niet aan het werk") # Ensure key is string if loaded from JSON
-                    index = st.session_state.WERKPLEK_NAMEN.index(default)
-                    nieuw_patroon[i] = st.selectbox(dag, st.session_state.WERKPLEK_NAMEN, index=index, key=f"patroon_{medewerker_patroon}_{i}")
-            c1, c2 = st.columns(2)
-            if c1.form_submit_button("💾 Sla mijn patroon op"):
+                    # We gebruiken het weekdagnummer (0=Maandag) als sleutel
+                    default_werkplek = huidig_patroon.get(str(i), "Niet aan het werk")
+                    try:
+                        # Zoek de index van de default werkplek in de lijst
+                        index = st.session_state.WERKPLEK_NAMEN.index(default_werkplek)
+                    except ValueError:
+                        # Als de opgeslagen werkplek niet meer bestaat, val terug op 'Niet aan het werk'
+                        index = st.session_state.WERKPLEK_NAMEN.index("Niet aan het werk")
+                
+                    nieuw_patroon[str(i)] = st.selectbox(dag_naam[:2], st.session_state.WERKPLEK_NAMEN, index=index, key=f"patroon_{medewerker_patroon}_{i}")
+
+            if st.form_submit_button("💾 Sla mijn patroon op", type="primary"):
                 st.session_state.user_patterns[medewerker_patroon] = nieuw_patroon
                 save_all_data()
                 st.success(f"Jouw patroon is opgeslagen, {medewerker_patroon}.")
-            if c2.form_submit_button("📆 Pas mijn patroon toe op huidige maand"):
-                patroon = st.session_state.user_patterns.get(medewerker_patroon)
-                if not patroon:
-                    st.warning(f"Sla eerst een patroon op, {medewerker_patroon}.")
-                else:
-                    vandaag = datetime.date.today()
-                    _, dagen_in_maand = py_cal.monthrange(vandaag.year, vandaag.month)
-                    for dag_nummer in range(1, dagen_in_maand + 1):
-                        datum = datetime.date(vandaag.year, vandaag.month, dag_nummer)
-                        werkplek = patroon.get(str(datum.weekday()), "Niet aan het werk") # Ensure key is string
-                        update_rooster_entry(datum, medewerker_patroon, werkplek)
-                    save_all_data()
-                    st.success(f"Jouw patroon is toegepast op {vandaag.strftime('%B %Y')}.")
+                # Een kleine rerun kan helpen om de 'default' waarden direct bij te werken
+                st.rerun()
+
+        st.divider()
+
+        # --- Deel 2: Opgeslagen patroon toepassen op een periode ---
+        st.write(f"**Stap 2: Pas je opgeslagen patroon toe op het rooster.**")
+    
+        patroon = st.session_state.user_patterns.get(medewerker_patroon)
+
+        if not patroon:
+            st.warning("Je hebt nog geen patroon opgeslagen. Doe dat eerst hierboven.")
+        else:
+            # Toon het opgeslagen patroon ter referentie
+            st.write("Jouw huidige opgeslagen patroon:")
+            patroon_cols = st.columns(7)
+            for i, dag_naam in enumerate(dagen_namen):
+                werkplek = patroon.get(str(i), "N.v.t.")
+                patroon_cols[i].metric(label=dag_naam, value=werkplek)
+
+            # Flexibele periode selectie
+            today = datetime.date.today()
+            #timedelta is handiger voor een vaste periode zoals 6 maanden (ca. 182 dagen)
+            six_months_later = today + datetime.timedelta(days=182) 
+        
+            col_start, col_end = st.columns(2)
+            with col_start:
+                start_datum = st.date_input("Startdatum", value=today)
+            with col_end:
+                eind_datum = st.date_input("Einddatum", value=six_months_later)
+        
+            if start_datum > eind_datum:
+                st.error("De startdatum kan niet na de einddatum liggen.")
+            elif st.button("📆 Pas patroon toe op geselecteerde periode", type="primary"):
+                import pandas as pd # Importeer pandas hier, of bovenaan je script
+
+                # Genereer alle datums in de geselecteerde periode
+                datums_in_periode = pd.date_range(start_datum, eind_datum)
+                updates_gedaan = 0
+            
+                # Gebruik een progress bar voor een betere gebruikerservaring
+                progress_text = "Patroon wordt toegepast op het rooster..."
+                my_bar = st.progress(0, text=progress_text)
+
+                for i, dag in enumerate(datums_in_periode):
+                    # .weekday() geeft 0 voor Maandag, ..., 6 voor Zondag
+                    weekdag_nummer = str(dag.weekday())
+                    werkplek = patroon.get(weekdag_nummer, "Niet aan het werk")
+
+                    # Converteer pandas timestamp terug naar een datetime.date object
+                    datum_voor_update = dag.date()
+                
+                    #Update de rooster entry in de session state (zonder direct op te slaan)
+                    update_rooster_entry(datum_voor_update, medewerker_patroon, werkplek)
+                    updates_gedaan += 1
+                
+                    # Update de progress bar
+                    my_bar.progress((i + 1) / len(datums_in_periode), text=f"{progress_text} ({dag.strftime('%d-%m-%Y')})")
+            
+                # Sla ALLE data in één keer op NA de loop. Dit is veel sneller.
+                save_all_data()
+            
+                my_bar.empty() # Verwijder de progress bar na voltooiing
+                st.success(f"✅ Jouw patroon is succesvol toegepast op **{updates_gedaan} dagen** in de periode van {start_datum.strftime('%d-%m-%Y')} tot {eind_datum.strftime('%d-%m-%Y')}.")
+            
+                # Forceer een 'rerun' van de app. Dit is de sleutel!
+                # Hierdoor wordt de hele app opnieuw geladen met de zojuist opgeslagen data,
+                # waardoor alle kalenders en overzichten direct up-to-date zijn.
+                st.rerun()
+
+# ==============================================================================
+# EINDE VAN HET TE VERVANGEN BLOK
+# ==============================================================================
 
     with st.expander("🧑‍🎓 Jouw Disciplines Beheren"):
         with st.form(key=f"skill_form_{st.session_state.logged_in_user}"):
