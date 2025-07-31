@@ -1,3 +1,4 @@
+# --- VOLLEDIGE CODE VOOR: Rooster_App.py ---
 # Sla dit bestand op als Rooster_App.py
 
 import streamlit as st
@@ -5,6 +6,7 @@ import datetime
 import uuid
 import calendar as py_cal
 import random
+import numpy as np
 
 # Probeer pandas te importeren, geef een foutmelding als het niet lukt
 try:
@@ -19,7 +21,9 @@ from utils import (
     save_all_data,
     get_maand_voltooiing_percentage,
     get_day_stats,
-    get_team_event_for_date
+    get_team_event_for_date,
+    add_note_for_day,  # Noodzakelijk voor demo-data
+    get_dutch_holiday_name # Noodzakelijk voor demo-data
 )
 
 initialize_session_state()
@@ -362,51 +366,158 @@ else:
                 st.success("Alle roosterdata, notities en verzoeken zijn verwijderd.")
                 st.rerun()
         with col2_del:
-            if st.button("Optioneel: Genereer demo-data"):
-                # Code voor demo-data generatie is hier ongewijzigd gelaten
+            # --- START: VOLLEDIG HERSCHREVEN DEMO DATA GENERATIE ---
+            if st.button("Optioneel: Genereer slimme demo-data"):
                 st.session_state.rooster_data = {}
                 st.session_state.beschikbaarheid_data = {}
                 st.session_state.notes_data = {}
                 st.session_state.medewerker_skills = {}
                 st.session_state.open_diensten = []
                 st.session_state.team_events = []
+                st.session_state.wijzigingsverzoeken = {}
+                st.session_state.rooster_vastgesteld = {}
+
+                progress_bar = st.progress(0, text="Slim rooster genereren... Fase 1: Voorbereiding")
+
+                # 1. Genereer skills voor medewerkers
                 for medewerker in st.session_state.MEDEWERKERS:
                     num_skills = random.randint(1, 2)
                     toegekende_skills = random.sample(st.session_state.SKILLS_BEREIKBAARHEID, num_skills)
                     st.session_state.medewerker_skills[medewerker] = {s: (s in toegekende_skills) for s in st.session_state.SKILLS_BEREIKBAARHEID}
+
                 start_datum = datetime.date.today() - datetime.timedelta(days=90)
                 eind_datum = datetime.date.today() + datetime.timedelta(days=90)
-                totaal_dagen = (eind_datum - start_datum).days + 1
-                progress_bar = st.progress(0, text="Slim rooster genereren...")
-                for i in range(totaal_dagen):
-                    huidige_dag = start_datum + datetime.timedelta(days=i)
+                datums_in_periode = pd.date_range(start_datum, eind_datum)
+
+                # 2. Plan speciale gebeurtenissen (Actiedagen, Team Momenten, etc.)
+                werkdagen_in_periode = [d for d in datums_in_periode if d.weekday() < 5 and not get_dutch_holiday_name(d.date())]
+                
+                # Plan 3 actiedagen
+                actiedag_datums = random.sample(werkdagen_in_periode, 3)
+                actiedag_personeel = {}
+                for dag in actiedag_datums:
+                    actiedag_personeel[dag.date()] = random.sample(st.session_state.MEDEWERKERS, 10)
+
+                # Plan team momenten
+                team_moment_datums = random.sample(werkdagen_in_periode, 4)
+                team_moment_beschrijvingen = ["Teamdag", "Retrospective", "Team Meeting", "Kwartaalplanning"]
+                for i, dag in enumerate(team_moment_datums):
+                    st.session_state.team_events.append({
+                        "id": str(uuid.uuid4()), # <-- FIX: ID toegevoegd
+                        "datum": dag.strftime("%Y-%m-%d"), 
+                        "beschrijving": team_moment_beschrijvingen[i],
+                        "maker": random.choice(st.session_state.TEAMLEIDERS) # <-- FIX: 'maker' toegevoegd
+                    })
+
+                # Plan een bijzondere inzet
+                inzet_datum = random.choice([d for d in werkdagen_in_periode if d.date() > datetime.date.today()])
+                behoefte = {"Digi": 4, "Tactiek": 2}
+                aanmeldingen = {"Digi": [], "Tactiek": []}
+                # Vind personeel met de juiste skills en meld een paar aan
+                for skill, aantal in behoefte.items():
+                    geschikte_collegas = [m for m, s in st.session_state.medewerker_skills.items() if s.get(skill)]
+                    aantal_aanmeldingen = random.randint(1, aantal)
+                    if geschikte_collegas:
+                       aanmeldingen[skill] = random.sample(geschikte_collegas, min(len(geschikte_collegas), aantal_aanmeldingen))
+
+                st.session_state.open_diensten.append({
+                    "id": str(uuid.uuid4()), "maker": "Tom", "datum": inzet_datum.strftime("%Y-%m-%d"),
+                    "werkplek": "Klapdag Recherche", "behoefte": behoefte, "aanmeldingen": aanmeldingen, "status": "open"
+                })
+
+                # 3. Hoofdloop voor het vullen van het rooster
+                totaal_dagen = len(datums_in_periode)
+                for i, dag_dt in enumerate(datums_in_periode):
+                    huidige_dag = dag_dt.date()
                     dag_index = huidige_dag.weekday()
-                    kantoor_doel = 0
-                    if dag_index in [1, 2, 3]: kantoor_doel = 15
-                    elif dag_index == 0: kantoor_doel = 8
-                    beschikbare_medewerkers = st.session_state.MEDEWERKERS.copy()
-                    random.shuffle(beschikbare_medewerkers)
-                    kantoor_medewerkers = []
-                    if kantoor_doel > 0:
-                        kantoor_medewerkers = beschikbare_medewerkers[:kantoor_doel]
-                        for medewerker in kantoor_medewerkers:
-                            update_rooster_entry(huidige_dag, medewerker, "Kantoor")
-                    overige_medewerkers = [m for m in beschikbare_medewerkers if m not in kantoor_medewerkers]
-                    for medewerker in overige_medewerkers:
+                    
+                    medewerkers_vandaag = st.session_state.rooster_data.get(huidige_dag.strftime('%Y-%m-%d'), {}).keys()
+
+                    for medewerker in st.session_state.MEDEWERKERS:
+                        if medewerker in medewerkers_vandaag:
+                            continue
+
                         werkplek = "Niet aan het werk"
-                        if dag_index >= 5:
-                            if random.random() < 0.05:
-                               werkplek = random.choice(["Aan het werk", "Actiedag"])
+
+                        if get_dutch_holiday_name(huidige_dag):
+                            werkplek = "Vakantie"
+                        elif dag_index >= 5:
+                            if random.random() < 0.03:
+                                weekend_diensten = ["HOvJ", "HOvJ (laat)", "TGO Piket"]
+                                gekozen_dienst = random.choice(weekend_diensten)
+                                if gekozen_dienst == "TGO Piket" and dag_index == 5:
+                                    werkplek = "TGO Piket"
+                                    zondag = huidige_dag + datetime.timedelta(days=1)
+                                    update_rooster_entry(zondag, medewerker, "TGO Piket")
+                                elif gekozen_dienst != "TGO Piket":
+                                    werkplek = gekozen_dienst
                         else:
-                            is_vakantie = (huidige_dag.month in [7, 8] and random.random() < 0.25) or (huidige_dag.month not in [7, 8] and random.random() < 0.07)
-                            if is_vakantie: werkplek = "Vakantie"
-                            elif random.random() > 0.15:
-                                werkplek_opties = [w['naam'] for w in st.session_state.WERKPLEKKEN_CONFIG if w['naam'] not in ["Kantoor"] + st.session_state.NIET_WERKEND_STATUS]
-                                werkplek = random.choice(werkplek_opties)
+                            if huidige_dag in actiedag_personeel and medewerker in actiedag_personeel[huidige_dag]:
+                                werkplek = "Actiedag"
+                            else:
+                                werk_opties = ["Kantoor", "Aan het werk", "Opleiding/cursus", "Vakantie", "Niet aan het werk"]
+                                if dag_index == 0: 
+                                    gewichten = [20, 30, 15, 5, 30]
+                                elif dag_index in [1, 2, 3]: 
+                                    gewichten = [60, 20, 10, 5, 5]
+                                elif dag_index == 4:
+                                    gewichten = [15, 10, 5, 10, 60]
+                                
+                                werkplek = random.choices(werk_opties, weights=gewichten, k=1)[0]
+                        
                         if werkplek != "Niet aan het werk":
-                             update_rooster_entry(huidige_dag, medewerker, werkplek)
-                    progress_bar.progress((i + 1) / totaal_dagen, text=f"Rooster voor {huidige_dag.strftime('%d-%m-%Y')} gevuld...")
+                            update_rooster_entry(huidige_dag, medewerker, werkplek)
+                    
+                    progress_bar.progress((i + 1) / totaal_dagen, text=f"Slim rooster genereren... Rooster voor {huidige_dag.strftime('%d-%m-%Y')} gevuld.")
+
+                                # --- START: VERVANG DEZE SECTIE IN Rooster_App.py ---
+
+                # 4. Voeg een groot aantal realistische, dagelijkse notities toe
+                progress_bar.progress(1.0, text="Fase 3: Afronden met notities...")
+                
+                # Uitgebreide pool van notities met type (persoonlijk/algemeen)
+                note_pool = [
+                    ("Ik ben vandaag iets later i.v.m. tandarts.", "Laat", "persoonlijk"),
+                    ("Werk vandaag deels thuis, kom later naar kantoor i.v.m. privé-afspraak.", "Info", "persoonlijk"),
+                    ("Vergeet je laptop niet mee te nemen, er is een controle.", "Belangrijk", "algemeen"),
+                    ("De weekstart is verplaatst naar 09:30.", "Info", "algemeen"),
+                    ("Systeem X is traag, er wordt aan gewerkt.", "Belangrijk", "algemeen"),
+                    ("Ik werk vandaag volledig vanuit huis.", "Info", "persoonlijk"),
+                    ("Wie kan er vanmiddag even sparren over casus Y?", "Info", "persoonlijk"),
+                    ("Lunch wordt vandaag verzorgd in de kantine!", "Info", "algemeen"),
+                    ("Ik neem vandaag een halve dag vrij, ben 's middags afwezig.", "Info", "persoonlijk"),
+                    ("Let op: de lift is buiten gebruik.", "Belangrijk", "algemeen"),
+                    ("Ik moet helaas iets eerder weg.", "Laat", "persoonlijk"),
+                ]
+
+                # Loop door alle werkdagen in de periode
+                for dag in werkdagen_in_periode:
+                    # 80% kans dat er op een werkdag een notitie is
+                    if random.random() < 0.80:
+                        tekst_template, categorie, note_type = random.choice(note_pool)
+                        
+                        # Bepaal auteur op basis van type notitie
+                        auteur = random.choice(st.session_state.MEDEWERKERS) if note_type == "persoonlijk" else "-- Algemene Notitie --"
+                        
+                        add_note_for_day(dag.date(), auteur, categorie, tekst_template)
+
+                        # 20% kans op een TWEEDE notitie op dezelfde dag
+                        if random.random() < 0.20:
+                            tekst_template2, categorie2, note_type2 = random.choice(note_pool)
+                            
+                            # Zorg voor een andere auteur als het weer een persoonlijke notitie is
+                            if note_type2 == "persoonlijk":
+                                mogelijke_auteurs = [m for m in st.session_state.MEDEWERKERS if m != auteur]
+                                auteur2 = random.choice(mogelijke_auteurs) if mogelijke_auteurs else auteur
+                            else:
+                                auteur2 = "-- Algemene Notitie --"
+
+                            add_note_for_day(dag.date(), auteur2, categorie2, tekst_template2)
+
+                # --- EINDE: VERVANG DEZE SECTIE IN Rooster_App.py ---
+
                 save_all_data()
                 progress_bar.empty()
-                st.success("Fictieve data is gegenereerd!")
+                st.success("✅ Fictieve, slimme data is succesvol gegenereerd!")
                 st.rerun()
+            # --- EINDE: VOLLEDIG HERSCHREVEN DEMO DATA GENERATIE ---
